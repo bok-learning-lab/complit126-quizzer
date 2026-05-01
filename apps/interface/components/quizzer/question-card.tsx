@@ -5,7 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { AudioRecorder } from "./audio-recorder";
 
-type Status = "idle" | "transcribing" | "transcribed" | "feedback-loading" | "done" | "error";
+type Phase =
+  | "ready"
+  | "main-transcribing"
+  | "followup-loading"
+  | "followup-ready"
+  | "followup-answering"
+  | "followup-transcribing"
+  | "followup-done"
+  | "error";
+
+export type PauseReason = "playback" | "thinking" | null;
 
 export function QuestionCard({
   index,
@@ -15,6 +25,9 @@ export function QuestionCard({
   question,
   addendum,
   questionType,
+  onPauseChange,
+  onComplete,
+  isLast,
 }: {
   index: number;
   total: number;
@@ -23,67 +36,102 @@ export function QuestionCard({
   question: string;
   addendum?: string;
   questionType: "specific" | "big";
+  onPauseChange?: (reason: PauseReason) => void;
+  onComplete: () => void;
+  isLast?: boolean;
 }) {
-  const [status, setStatus] = React.useState<Status>("idle");
+  const [phase, setPhase] = React.useState<Phase>("ready");
   const [transcript, setTranscript] = React.useState<string>("");
-  const [feedback, setFeedback] = React.useState<string>("");
+  const [followup, setFollowup] = React.useState<string>("");
+  const [followupTranscript, setFollowupTranscript] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
+  const [audioPlaying, setAudioPlaying] = React.useState(false);
 
-  async function handleAudio(blob: Blob) {
+  // Combine audio playback with thinking-state into a single pause signal for the
+  // parent's countdown clock. Replay and follow-up generation both pause it.
+  React.useEffect(() => {
+    let reason: PauseReason = null;
+    if (audioPlaying) reason = "playback";
+    else if (phase === "followup-loading") reason = "thinking";
+    onPauseChange?.(reason);
+  }, [audioPlaying, phase, onPauseChange]);
+
+  // Make sure we don't leave the timer paused when this card unmounts.
+  React.useEffect(() => {
+    return () => onPauseChange?.(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function transcribe(blob: Blob): Promise<string> {
+    const fd = new FormData();
+    fd.append("audio", blob, "answer.webm");
+    const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "transcription failed");
+    return data.text || "";
+  }
+
+  async function fetchFollowup(transcriptText: string): Promise<string> {
+    const res = await fetch("/api/followup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionType, question, addendum, transcript: transcriptText }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "follow-up failed");
+    return data.question || "";
+  }
+
+  async function handleMainAudio(blob: Blob) {
     setError(null);
-    setStatus("transcribing");
+    setPhase("main-transcribing");
     try {
-      const fd = new FormData();
-      fd.append("audio", blob, "answer.webm");
-      const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "transcription failed");
-      setTranscript(data.text || "");
-      setStatus("transcribed");
+      const t = await transcribe(blob);
+      setTranscript(t);
+      setPhase("followup-loading");
+      const f = await fetchFollowup(t);
+      setFollowup(f);
+      setPhase("followup-ready");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "transcription failed");
-      setStatus("error");
+      setError(e instanceof Error ? e.message : "something went wrong");
+      setPhase("error");
     }
   }
 
-  async function getFeedback() {
+  async function handleFollowupAudio(blob: Blob) {
     setError(null);
-    setStatus("feedback-loading");
+    setPhase("followup-transcribing");
     try {
-      const res = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionType,
-          question,
-          addendum,
-          transcript,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "feedback failed");
-      setFeedback(data.feedback || "");
-      setStatus("done");
+      const t = await transcribe(blob);
+      setFollowupTranscript(t);
+      setPhase("followup-done");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "feedback failed");
-      setStatus("error");
+      setError(e instanceof Error ? e.message : "something went wrong");
+      setPhase("error");
     }
   }
 
-  const lockRecorder =
-    status === "transcribing" || status === "feedback-loading";
+  const showFollowupSection = [
+    "followup-ready",
+    "followup-answering",
+    "followup-transcribing",
+    "followup-done",
+  ].includes(phase);
+
+  // Bottom Next button is only useful as the natural exit at the end (or to bail
+  // out on error). The followup-ready stage has its own dedicated either/or.
+  const showBottomNext = phase === "followup-done" || phase === "error";
+
+  const nextLabel = isLast ? "Finish" : "Next question →";
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardDescription className="uppercase tracking-wide text-xs">
-            {label} {index} of {total}
-            {unit ? ` · ${unit}` : ""}
-            {questionType === "big" ? " · 4 min" : " · 2–3 min"}
-          </CardDescription>
-        </div>
-        <CardTitle className="text-xl leading-snug font-normal">
+        <CardDescription className="uppercase tracking-wide text-xs">
+          {label} {index} of {total}
+          {unit ? ` · ${unit}` : ""}
+        </CardDescription>
+        <CardTitle className="text-2xl leading-snug font-normal">
           {question}
         </CardTitle>
         {addendum && (
@@ -92,10 +140,14 @@ export function QuestionCard({
           </p>
         )}
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <AudioRecorder onAudioReady={handleAudio} disabled={lockRecorder} />
+      <CardContent className="flex flex-col gap-5">
+        <AudioRecorder
+          onAudioReady={handleMainAudio}
+          onPlayingChange={setAudioPlaying}
+          disabled={phase === "main-transcribing" || phase === "followup-loading"}
+        />
 
-        {status === "transcribing" && (
+        {phase === "main-transcribing" && (
           <p className="text-sm text-muted-foreground">Transcribing your answer…</p>
         )}
 
@@ -110,40 +162,83 @@ export function QuestionCard({
           </details>
         )}
 
-        {status === "transcribed" && (
-          <Button onClick={getFeedback} className="self-start">
-            Get reflective feedback
-          </Button>
-        )}
-
-        {status === "feedback-loading" && (
+        {phase === "followup-loading" && (
           <p className="text-sm text-muted-foreground">
-            Asking Claude for some questions to think about…
+            Claude is generating five candidate follow-ups, then a second call
+            picks the best one. The clock is paused while this runs.
           </p>
         )}
 
-        {feedback && (
-          <div className="rounded-md border bg-muted/40 p-4">
+        {showFollowupSection && (
+          <div className="rounded-lg border bg-muted/40 p-5">
             <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-              Reflective feedback
+              Follow-up question
             </p>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed">
-              {feedback}
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mt-3"
-              onClick={getFeedback}
-              disabled={lockRecorder}
-            >
-              Ask again
-            </Button>
+            <p className="mb-4 text-base leading-snug">{followup}</p>
+
+            {phase === "followup-ready" && (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                  You can record a quick response (60–90 seconds) to push your
+                  thinking, or skip ahead and save the time for the next
+                  question.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Button
+                    onClick={() => setPhase("followup-answering")}
+                    size="lg"
+                    className="h-auto whitespace-normal py-3 text-left"
+                  >
+                    Answer this follow-up
+                  </Button>
+                  <Button
+                    onClick={onComplete}
+                    variant="outline"
+                    size="lg"
+                    className="h-auto whitespace-normal py-3 text-left"
+                  >
+                    {isLast ? "Finish without answering" : "Skip — next question →"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {phase === "followup-answering" && (
+              <AudioRecorder
+                onAudioReady={handleFollowupAudio}
+                onPlayingChange={setAudioPlaying}
+              />
+            )}
+
+            {phase === "followup-transcribing" && (
+              <p className="text-sm text-muted-foreground">
+                Transcribing your follow-up answer…
+              </p>
+            )}
+
+            {followupTranscript && (
+              <details className="mt-3 rounded-md border bg-background p-3 text-sm" open>
+                <summary className="cursor-pointer select-none font-medium">
+                  Follow-up transcript
+                </summary>
+                <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                  {followupTranscript}
+                </p>
+              </details>
+            )}
           </div>
         )}
 
         {error && (
           <p className="text-sm text-destructive">Error: {error}</p>
+        )}
+
+        {showBottomNext && (
+          <div className="flex justify-end">
+            <Button onClick={onComplete} size="lg">
+              {nextLabel}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>

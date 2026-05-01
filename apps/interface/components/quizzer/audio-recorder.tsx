@@ -8,10 +8,14 @@ type RecorderState = "idle" | "recording" | "stopped";
 
 export function AudioRecorder({
   onAudioReady,
+  onPlayingChange,
   disabled,
+  hideReRecord,
 }: {
   onAudioReady: (blob: Blob, durationSec: number) => void;
+  onPlayingChange?: (playing: boolean) => void;
   disabled?: boolean;
+  hideReRecord?: boolean;
 }) {
   const [state, setState] = React.useState<RecorderState>("idle");
   const [elapsed, setElapsed] = React.useState(0);
@@ -33,9 +37,16 @@ export function AudioRecorder({
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
       if (audioUrl) URL.revokeObjectURL(audioUrl);
+      // If we unmount while playing, signal that we're no longer playing.
+      if (isPlaying) onPlayingChange?.(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function emitPlaying(p: boolean) {
+    setIsPlaying(p);
+    onPlayingChange?.(p);
+  }
 
   async function start() {
     setError(null);
@@ -43,7 +54,6 @@ export function AudioRecorder({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Pick a mime type the browser supports. Whisper accepts webm/ogg/mp4/mp3/wav/m4a.
       const candidates = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -99,16 +109,13 @@ export function AudioRecorder({
     setAudioUrl(null);
     setElapsed(0);
     setState("idle");
-    setIsPlaying(false);
+    if (isPlaying) emitPlaying(false);
   }
 
   function togglePlay() {
     if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
+    if (isPlaying) audioRef.current.pause();
+    else audioRef.current.play();
   }
 
   const mm = Math.floor(elapsed / 60).toString().padStart(2, "0");
@@ -131,11 +138,13 @@ export function AudioRecorder({
           <>
             <Button onClick={togglePlay} variant="outline" size="lg">
               {isPlaying ? <Pause /> : <Play />}
-              {isPlaying ? "Pause" : "Play back"}
+              {isPlaying ? "Pause replay" : "Replay (pauses timer)"}
             </Button>
-            <Button onClick={reset} variant="ghost" size="lg" disabled={disabled}>
-              <RotateCcw /> Re-record
-            </Button>
+            {!hideReRecord && (
+              <Button onClick={reset} variant="ghost" size="lg" disabled={disabled}>
+                <RotateCcw /> Re-record
+              </Button>
+            )}
           </>
         )}
         <span className="font-mono text-sm tabular-nums text-muted-foreground">
@@ -153,9 +162,9 @@ export function AudioRecorder({
         <audio
           ref={audioRef}
           src={audioUrl}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
+          onPlay={() => emitPlaying(true)}
+          onPause={() => emitPlaying(false)}
+          onEnded={() => emitPlaying(false)}
           className="hidden"
         />
       )}
