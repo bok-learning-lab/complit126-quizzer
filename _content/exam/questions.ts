@@ -181,13 +181,18 @@ export const bigQuestions: string[] = [
   "How do new technologies change the definition of what counts as art? What do we learn by translating experience and its representation from one medium into another?",
 ];
 
-export const rubric = `Specific Questions (8 pts each):
-- Content (3 pts): recall and summarize, accurately naming central characters, forms, images, or concepts.
-- Analysis (3 pts): use methods we studied (close reading, distant reading, historicist contextualization, psychoanalysis, phenomenology, critical theory) to build a persuasive account; precise and interesting claims supported by evidence.
-- Presentation (2 pts): clear, compelling claims; a strong idea articulated in the time allotted.
+// The rubric in its prose / question form, drawn from the prep packet. The
+// numeric weights from the original (3 pts, 4 pts, etc.) are intentionally
+// stripped — students should be able to see and hear these criteria, but not
+// be assessed quantitatively by the practice tool.
+export const rubric = `For specific questions, examiners ask:
 
-Big Question (14 pts):
-- Content (4 pts): see above.
-- Analysis (4 pts): see above.
-- Connection-Building (4 pts): connect observations to phenomena related to contemporary AI, drawing on course readings, conversations, and exercises.
-- Presentation (2 pts): see above.`;
+Content — Did you recall and summarize the content of the texts you cited, accurately naming central characters, forms, images, or concepts?
+
+Analysis — Did you use methods that we studied in class (e.g. "distant reading," "close reading," historicist contextualization, psychoanalysis, phenomenology, or critical theory) to build a persuasive account of the texts that you chose to discuss? Did you make precise and interesting claims? Did the evidence that you cited support them?
+
+Presentation — Did you state your claims in a clear and compelling fashion? Were you able to articulate a strong idea in the time allotted?
+
+For the big question, the same Content, Analysis, and Presentation questions apply, plus:
+
+Connection-Building — Did you successfully connect your observations to phenomena related to contemporary AI? Did you speak about contemporary AI intelligently and fluently, drawing on course readings, conversations, and exercises?`;

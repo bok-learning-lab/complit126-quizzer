@@ -17,6 +17,12 @@ type Phase =
 
 export type PauseReason = "playback" | "thinking" | null;
 
+export type AnswerProgress = {
+  mainTranscript: string;
+  followupQuestion?: string;
+  followupTranscript?: string;
+};
+
 export function QuestionCard({
   index,
   total,
@@ -26,6 +32,7 @@ export function QuestionCard({
   addendum,
   questionType,
   onPauseChange,
+  onAnswerChange,
   onComplete,
   isLast,
 }: {
@@ -37,6 +44,7 @@ export function QuestionCard({
   addendum?: string;
   questionType: "specific" | "big";
   onPauseChange?: (reason: PauseReason) => void;
+  onAnswerChange?: (progress: AnswerProgress) => void;
   onComplete: () => void;
   isLast?: boolean;
 }) {
@@ -61,6 +69,17 @@ export function QuestionCard({
     return () => onPauseChange?.(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Lift transcripts up so the page can build a session-wide cache for the
+  // end-of-session rubric summary, even if the student runs out of time mid-card.
+  React.useEffect(() => {
+    if (!transcript) return;
+    onAnswerChange?.({
+      mainTranscript: transcript,
+      followupQuestion: followup || undefined,
+      followupTranscript: followupTranscript || undefined,
+    });
+  }, [transcript, followup, followupTranscript, onAnswerChange]);
 
   async function transcribe(blob: Blob): Promise<string> {
     const fd = new FormData();
